@@ -63,8 +63,8 @@ function generateSampleData() {
 
 export default function App() {
   const [view, setView] = useState("home");
-  const [cycles, setCycles] = useState(generateSampleData);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
+  const [cycles, setCycles] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [showAdBanner, setShowAdBanner] = useState(true);
   const [showPremium, setShowPremium] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
@@ -87,6 +87,9 @@ export default function App() {
     });
   }
   const [logEntry, setLogEntry] = useState({ symptoms: [], flow: null, notes: "" });
+  const [hasOnboarded, setHasOnboarded] = useState(() => {
+    return !!localStorage.getItem("juno_onboarded");
+  });
   const [showLogSaved, setShowLogSaved] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [locationGranted, setLocationGranted] = useState(false);
@@ -94,13 +97,24 @@ export default function App() {
   const [moonData, setMoonData] = useState(() => getMoonPhase(new Date()));
   const [moonLoading, setMoonLoading] = useState(false);
 
+  // Update today's date when app comes back into focus (fixes stale date on iPhone)
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (!document.hidden) {
+        setSelectedDate(new Date().toISOString().split("T")[0]);
+        setMoonData(getMoonPhase(new Date()));
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
   // Persist to localStorage
   useEffect(() => {
     const saved = localStorage.getItem("juno_cycles");
     if (saved) setCycles(JSON.parse(saved));
     const prem = localStorage.getItem("juno_premium");
     if (prem) setIsPremium(true);
-    // settings loaded inline via useState initialiser
   }, []);
 
   useEffect(() => {
@@ -178,7 +192,7 @@ export default function App() {
     } else { enable(); }
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toISOString().split("T")[0]; // recomputes on each render — always accurate
   const latestCycle = cycles[cycles.length - 1];
 
   useEffect(() => {
@@ -197,26 +211,57 @@ export default function App() {
 
   function getPredictions() {
     if (cycles.length < 2) return {};
-    const symptomDays = {};
+    const symptomData = {};
     cycles.forEach((cycle) => {
       Object.entries(cycle.entries).forEach(([date, entry]) => {
         const start = new Date(cycle.startDate);
         const d = new Date(date);
         const day = Math.floor((d - start) / (1000 * 60 * 60 * 24)) + 1;
         entry.symptoms.forEach((s) => {
-          if (!symptomDays[s]) symptomDays[s] = [];
-          symptomDays[s].push(day);
+          if (!symptomData[s]) symptomData[s] = { days: [], cyclesPresent: new Set() };
+          symptomData[s].days.push(day);
+          symptomData[s].cyclesPresent.add(cycle.startDate);
         });
       });
     });
     const predictions = {};
-    Object.entries(symptomDays).forEach(([s, days]) => {
-      if (days.length >= 2) {
-        const avg = Math.round(days.reduce((a, b) => a + b, 0) / days.length);
-        predictions[s] = avg;
+    Object.entries(symptomData).forEach(([s, data]) => {
+      if (data.cyclesPresent.size >= 2) {
+        const avg = Math.round(data.days.reduce((a, b) => a + b, 0) / data.days.length);
+        // consistency = % of cycles this symptom appeared in
+        const consistency = Math.round((data.cyclesPresent.size / cycles.length) * 100);
+        predictions[s] = { avgDay: avg, consistency, cycleCount: data.cyclesPresent.size };
       }
     });
     return predictions;
+  }
+
+  // Smart sorted insights for home page
+  function getSmartInsights(cycleDay) {
+    const predictions = getPredictions();
+    const cycleLen = nextPeriod?.cycleLength || settings.cycleLength || 28;
+    const entries = Object.entries(predictions);
+    if (entries.length === 0) return [];
+
+    return entries.map(([id, data]) => {
+      const sym = SYMPTOMS.find(x => x.id === id);
+      if (!sym) return null;
+      const daysUntil = cycleDay ? data.avgDay - cycleDay : null;
+      const isUpcoming = daysUntil !== null && daysUntil >= 0 && daysUntil <= 6;
+      const isToday = daysUntil === 0;
+      const isPast = daysUntil !== null && daysUntil < 0;
+
+      // Score: upcoming symptoms ranked first, then by consistency
+      let score = data.consistency;
+      if (isToday) score += 1000;
+      else if (isUpcoming) score += 500 - daysUntil * 10; // sooner = higher
+      else if (isPast) score -= 200; // past this cycle = lower priority
+
+      return { id, sym, avgDay: data.avgDay, consistency: data.consistency, daysUntil, isUpcoming, isToday, isPast, score };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
   }
 
   function getWarnings() {
@@ -224,7 +269,8 @@ export default function App() {
     const cycleDay = getCycleDay(today);
     if (!cycleDay) return [];
     const warnings = [];
-    Object.entries(predictions).forEach(([s, day]) => {
+    Object.entries(predictions).forEach(([s, data]) => {
+      const day = data.avgDay;
       const diff = day - cycleDay;
       if (diff >= 0 && diff <= 3) {
         const sym = SYMPTOMS.find((x) => x.id === s);
@@ -388,13 +434,149 @@ export default function App() {
     );
   }
 
+  // ONBOARDING MODAL
+  function OnboardingModal() {
+    const [step, setStep] = useState(0);
+    const [cycleInputs, setCycleInputs] = useState([
+      { startDate: "", length: "28" },
+      { startDate: "", length: "28" },
+      { startDate: "", length: "28" },
+    ]);
+    const [error, setError] = useState("");
+
+    function updateInput(idx, field, value) {
+      setCycleInputs(prev => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], [field]: value };
+        return next;
+      });
+    }
+
+    function handleFinish() {
+      // Validate at least the most recent cycle has a date
+      const filled = cycleInputs.filter(c => c.startDate);
+      if (filled.length === 0) {
+        setError("Please enter at least your most recent period start date.");
+        return;
+      }
+
+      // Sort by date ascending and build cycle objects
+      const sorted = [...filled].sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+      const newCycles = sorted.map(c => ({
+        startDate: c.startDate,
+        entries: {
+          [c.startDate]: { symptoms: [], flow: "Medium", notes: "" },
+        }
+      }));
+
+      // Auto-fill period days based on period length setting
+      const periodLen = settings.periodLength || 5;
+      const finalCycles = newCycles.map(cycle => {
+        const entries = { ...cycle.entries };
+        for (let d = 1; d < periodLen; d++) {
+          const date = new Date(cycle.startDate);
+          date.setDate(date.getDate() + d);
+          const ds = date.toISOString().split("T")[0];
+          entries[ds] = { symptoms: [], flow: d < 2 ? "Heavy" : d < 4 ? "Medium" : "Light", notes: "" };
+        }
+        return { ...cycle, entries };
+      });
+
+      setCycles(finalCycles);
+      localStorage.setItem("juno_cycles", JSON.stringify(finalCycles));
+      localStorage.setItem("juno_onboarded", "1");
+      setHasOnboarded(true);
+    }
+
+    const inputStyle = {
+      background: "#faf6ee",
+      border: "1px solid #ddd0b8",
+      borderRadius: "10px",
+      color: "#3e3428",
+      padding: "10px 14px",
+      fontFamily: "'DM Sans', sans-serif",
+      fontSize: "14px",
+      width: "100%",
+      boxSizing: "border-box",
+      marginTop: "6px",
+    };
+
+    const labels = ["Most recent period", "Period before that", "One before that"];
+    const sublabels = ["Required", "Optional — improves predictions", "Optional — improves predictions"];
+
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(45,34,20,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        <div style={{ background: "#faf6ee", borderRadius: "24px", padding: "28px 24px", maxWidth: "360px", width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", border: "1px solid #ddd0b8" }}>
+          {/* Header */}
+          <div style={{ textAlign: "center", marginBottom: "24px" }}>
+            <div style={{ fontSize: "32px", marginBottom: "8px" }}>🌸</div>
+            <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#6b4f7a", margin: "0 0 6px", fontFamily: "'DM Sans', sans-serif" }}>Welcome to Juno</h2>
+            <p style={{ fontSize: "13px", color: "#8a7e6a", lineHeight: 1.6, margin: 0 }}>
+              To get started, enter your recent period dates. This helps Juno understand your cycle right away.
+            </p>
+          </div>
+
+          {/* Cycle inputs */}
+          {cycleInputs.map((c, i) => (
+            <div key={i} style={{ marginBottom: "16px" }}>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#6b4f7a", textTransform: "uppercase", letterSpacing: "1px" }}>{labels[i]}</div>
+              <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "2px" }}>{sublabels[i]}</div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ flex: 2 }}>
+                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "2px" }}>Start date</div>
+                  <input
+                    type="date"
+                    max={new Date().toISOString().split("T")[0]}
+                    value={c.startDate}
+                    onChange={e => updateInput(i, "startDate", e.target.value)}
+                    style={inputStyle}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "2px" }}>Length</div>
+                  <select
+                    value={c.length}
+                    onChange={e => updateInput(i, "length", e.target.value)}
+                    style={{ ...inputStyle, appearance: "none" }}
+                  >
+                    {Array.from({ length: 15 }, (_, i) => i + 21).map(n => (
+                      <option key={n} value={n}>{n} days</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {error && (
+            <div style={{ background: "#fdf0ee", border: "1px solid #f0c8b8", borderRadius: "8px", padding: "8px 12px", fontSize: "12px", color: "#9a3a2a", marginBottom: "12px" }}>
+              {error}
+            </div>
+          )}
+
+          <button
+            onClick={handleFinish}
+            style={{ width: "100%", background: "linear-gradient(135deg, #8a6a9a, #6b4f7a)", border: "none", borderRadius: "14px", color: "white", padding: "14px", fontSize: "15px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: "0 4px 14px rgba(107,79,122,0.35)", marginBottom: "10px" }}
+          >
+            Start tracking →
+          </button>
+          <div style={{ textAlign: "center", fontSize: "11px", color: "#8a7e6a" }}>
+            You can always update this in the Log tab
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // HOME VIEW
   function HomeView() {
-    const cycleLen = nextPeriod?.cycleLength || 28;
+    const cycleLen = nextPeriod?.cycleLength || settings.cycleLength || 28;
 
     function getPhase(day, len) {
       if (!day) return null;
-      const pct = (day - 1) / len;
+      // If past expected cycle length, clamp to luteal
+      const effectiveDay = Math.min(day, len);
+      const pct = (effectiveDay - 1) / len;
       if (pct < 0.18) return "menstrual";
       if (pct < 0.45) return "follicular";
       if (pct < 0.55) return "ovulation";
@@ -482,14 +664,14 @@ export default function App() {
         <svg width="100%" viewBox={`0 0 ${W} ${H + 26}`} style={{ overflow: "visible" }}>
           <defs>
             <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%"   stopColor="#6b4f7a" stopOpacity="0.85"/>
-              <stop offset="18%"  stopColor="#6b4f7a" stopOpacity="0.7"/>
+              <stop offset="0%"   stopColor="#c0394f" stopOpacity="0.85"/>
+              <stop offset="18%"  stopColor="#c0394f" stopOpacity="0.7"/>
               <stop offset="45%"  stopColor="#b8820a" stopOpacity="0.75"/>
-              <stop offset="55%"  stopColor="#c87840" stopOpacity="0.9"/>
+              <stop offset="55%"  stopColor="#c07010" stopOpacity="0.9"/>
               <stop offset="100%" stopColor="#6b3a8a" stopOpacity="0.75"/>
             </linearGradient>
             <linearGradient id="phaseGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%"   stopColor="#6b4f7a" stopOpacity="0.18"/>
+              <stop offset="0%"   stopColor="#c0394f" stopOpacity="0.16"/>
               <stop offset="14%"  stopColor="#6b4f7a" stopOpacity="0.10"/>
               <stop offset="28%"  stopColor="#6b4f7a" stopOpacity="0.0"/>
               <stop offset="42%"  stopColor="#c87840" stopOpacity="0.0"/>
@@ -647,15 +829,54 @@ export default function App() {
 
         <div style={styles.card}>
           <p style={styles.sectionTitle}>Cycle patterns</p>
-          {Object.entries(getPredictions()).slice(0, 3).map(([s, day]) => {
-            const sym = SYMPTOMS.find((x) => x.id === s);
-            return sym ? (
-              <div key={s} style={styles.insight}>
-                {sym.emoji} {sym.label} tends to appear around <strong>day {day}</strong>
-              </div>
-            ) : null;
-          })}
-          <button style={{ background: "transparent", border: "1.5px solid #cddce8", borderRadius: "12px", color: "#6b4f7a", padding: "10px 20px", fontFamily: "'DM Sans', sans-serif", fontSize: "13px", cursor: "pointer", fontWeight: "500", marginTop: "8px", width: "100%" }} onClick={() => setView("insights")}>View full insights →</button>
+          {getSmartInsights(cycleDay).length === 0 ? (
+            <div style={{ ...styles.insight, color: "#8a7e6a", fontStyle: "italic" }}>
+              Log symptoms across 2+ cycles to unlock personalised patterns.
+            </div>
+          ) : (
+            getSmartInsights(cycleDay).map((insight) => {
+              const isToday = insight.isToday;
+              const isUpcoming = insight.isUpcoming && !isToday;
+              const isPast = insight.isPast;
+              const bg = isToday
+                ? "rgba(192,57,79,0.08)"
+                : isUpcoming
+                ? "rgba(184,130,10,0.07)"
+                : styles.insight.background;
+              const border = isToday
+                ? "1px solid rgba(192,57,79,0.25)"
+                : isUpcoming
+                ? "1px solid rgba(184,130,10,0.2)"
+                : styles.insight.border;
+
+              return (
+                <div key={insight.id} style={{ ...styles.insight, background: bg, border, marginBottom: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: "14px" }}>{insight.sym.emoji}</span>{" "}
+                      <strong>{insight.sym.label}</strong>
+                      {isToday && <span style={{ marginLeft: "6px", fontSize: "10px", background: "rgba(192,57,79,0.12)", color: "#c0394f", borderRadius: "8px", padding: "2px 7px", fontWeight: "700" }}>TODAY</span>}
+                      {isUpcoming && <span style={{ marginLeft: "6px", fontSize: "10px", background: "rgba(184,130,10,0.1)", color: "#b8820a", borderRadius: "8px", padding: "2px 7px", fontWeight: "700" }}>IN {insight.daysUntil}d</span>}
+                      <div style={{ fontSize: "11px", color: "#8a7e6a", marginTop: "2px" }}>
+                        {isToday
+                          ? `Usually arrives today — day ${insight.avgDay}`
+                          : isUpcoming
+                          ? `Expected around day ${insight.avgDay} of your cycle`
+                          : isPast
+                          ? `Usually around day ${insight.avgDay} — may have passed`
+                          : `Typically appears around day ${insight.avgDay}`}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "10px", color: "#8a7e6a", textAlign: "right", flexShrink: 0, paddingLeft: "8px" }}>
+                      {insight.consistency}%<br/>
+                      <span style={{ fontSize: "9px" }}>of cycles</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <button style={{ background: "transparent", border: "1.5px solid #e8e0d8", borderRadius: "12px", color: "#6b4f7a", padding: "10px 20px", fontFamily: "'DM Sans', sans-serif", fontSize: "13px", cursor: "pointer", fontWeight: "500", marginTop: "8px", width: "100%" }} onClick={() => setView("insights")}>View full insights →</button>
         </div>
       </div>
     );
@@ -728,13 +949,22 @@ export default function App() {
 
     function getCycleChartData() {
       return cycles.map((cycle, i) => {
-        const maxDay = Math.max(
-          ...Object.keys(cycle.entries).map((date) => {
-            const start = new Date(cycle.startDate);
-            const d = new Date(date);
-            return Math.floor((d - start) / (1000 * 60 * 60 * 24)) + 1;
-          }), 28
-        );
+        const start = new Date(cycle.startDate);
+
+        // Actual cycle length = days until next cycle started, or days until today for current
+        const nextCycleStart = cycles[i + 1] ? new Date(cycles[i + 1].startDate) : new Date(today);
+        const actualCycleLen = Math.floor((nextCycleStart - start) / (1000 * 60 * 60 * 24));
+
+        // Also check if any entries go beyond the calculated length
+        const entryMaxDay = Object.keys(cycle.entries).reduce((max, date) => {
+          const d = new Date(date);
+          const day = Math.floor((d - start) / (1000 * 60 * 60 * 24)) + 1;
+          return Math.max(max, day);
+        }, 0);
+
+        // Use whichever is longer — but cap at 60 to avoid runaway current cycles
+        const maxDay = Math.min(Math.max(actualCycleLen, entryMaxDay), 60);
+
         const days = [];
         for (let d = 1; d <= maxDay; d++) {
           const date = new Date(cycle.startDate);
@@ -918,7 +1148,7 @@ export default function App() {
           <p style={styles.sectionTitle}>Symptom patterns</p>
           <p style={{ fontSize: "12px", color: "#8a7e6a", marginTop: 0 }}>Tap to see when each symptom typically appears</p>
           <div style={{ display: "flex", flexWrap: "wrap" }}>
-            {SYMPTOMS.filter((s) => predictions[s.id]).map((s) => (
+            {SYMPTOMS.filter((s) => predictions[s.id]?.avgDay).map((s) => (
               <button key={s.id} style={styles.symptomChip(selectedSymptom === s.id)} onClick={() => setSelectedSymptom(selectedSymptom === s.id ? null : s.id)}>
                 {s.emoji} {s.label}
               </button>
@@ -1067,7 +1297,7 @@ export default function App() {
     const [showClearConfirm, setShowClearConfirm] = useState(false);
 
     function handleClear() {
-      setCycles(generateSampleData());
+      setCycles([]); localStorage.removeItem("juno_onboarded"); setHasOnboarded(false);
       localStorage.removeItem("juno_cycles");
       setShowClearConfirm(false);
     }
@@ -1190,6 +1420,7 @@ export default function App() {
 
   return (
     <div style={styles.app}>
+      {!hasOnboarded && <OnboardingModal />}
       <PremiumModal />
       {view === "home" && <HomeView />}
       {view === "log" && <LogView />}
