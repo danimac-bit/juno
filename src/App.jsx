@@ -436,11 +436,10 @@ export default function App() {
 
   // ONBOARDING MODAL
   function OnboardingModal() {
-    const [step, setStep] = useState(0);
     const [cycleInputs, setCycleInputs] = useState([
-      { startDate: "", length: "28" },
-      { startDate: "", length: "28" },
-      { startDate: "", length: "28" },
+      { startDate: "", endDate: "" },
+      { startDate: "", endDate: "" },
+      { startDate: "", endDate: "" },
     ]);
     const [error, setError] = useState("");
 
@@ -452,34 +451,63 @@ export default function App() {
       });
     }
 
+    // Live preview of current cycle day based on most recent start date
+    function getCurrentCycleDay() {
+      const recent = cycleInputs[0];
+      if (!recent.startDate) return null;
+      const start = new Date(recent.startDate);
+      const todayDate = new Date();
+      const diff = Math.floor((todayDate - start) / (1000 * 60 * 60 * 24));
+      return diff >= 0 ? diff + 1 : null;
+    }
+
     function handleFinish() {
-      // Validate at least the most recent cycle has a date
       const filled = cycleInputs.filter(c => c.startDate);
       if (filled.length === 0) {
         setError("Please enter at least your most recent period start date.");
         return;
       }
+      // Validate end dates are after start dates
+      for (const c of filled) {
+        if (c.endDate && new Date(c.endDate) < new Date(c.startDate)) {
+          setError("Period end date can't be before the start date.");
+          return;
+        }
+      }
 
-      // Sort by date ascending and build cycle objects
+      // Sort oldest first
       const sorted = [...filled].sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-      const newCycles = sorted.map(c => ({
-        startDate: c.startDate,
-        entries: {
-          [c.startDate]: { symptoms: [], flow: "Medium", notes: "" },
-        }
-      }));
 
-      // Auto-fill period days based on period length setting
-      const periodLen = settings.periodLength || 5;
-      const finalCycles = newCycles.map(cycle => {
-        const entries = { ...cycle.entries };
-        for (let d = 1; d < periodLen; d++) {
-          const date = new Date(cycle.startDate);
-          date.setDate(date.getDate() + d);
-          const ds = date.toISOString().split("T")[0];
-          entries[ds] = { symptoms: [], flow: d < 2 ? "Heavy" : d < 4 ? "Medium" : "Light", notes: "" };
+      const finalCycles = sorted.map((c, i) => {
+        const entries = {};
+        const start = new Date(c.startDate);
+
+        // If end date provided, fill those days with flow entries
+        // If not, use the difference between this start and next start, capped at 7
+        let periodLen = 1;
+        if (c.endDate) {
+          periodLen = Math.floor((new Date(c.endDate) - start) / (1000 * 60 * 60 * 24)) + 1;
+        } else if (sorted[i + 1]) {
+          // Estimate from next period start — period is usually 3-7 days
+          const gapToNext = Math.floor((new Date(sorted[i + 1].startDate) - start) / (1000 * 60 * 60 * 24));
+          periodLen = Math.min(gapToNext, 5);
+        } else {
+          periodLen = 5; // default if no info
         }
-        return { ...cycle, entries };
+        periodLen = Math.max(1, Math.min(periodLen, 10)); // clamp 1-10
+
+        for (let d = 0; d < periodLen; d++) {
+          const date = new Date(start);
+          date.setDate(start.getDate() + d);
+          const ds = date.toISOString().split("T")[0];
+          entries[ds] = {
+            symptoms: d === 0 ? ["cramps"] : [],
+            flow: d === 0 ? "Heavy" : d < 2 ? "Heavy" : d < 4 ? "Medium" : "Light",
+            notes: "",
+          };
+        }
+
+        return { startDate: c.startDate, entries };
       });
 
       setCycles(finalCycles);
@@ -489,41 +517,56 @@ export default function App() {
     }
 
     const inputStyle = {
-      background: "#faf6ee",
+      background: "#ffffff",
       border: "1px solid #ddd0b8",
       borderRadius: "10px",
       color: "#3e3428",
-      padding: "10px 14px",
+      padding: "10px 12px",
       fontFamily: "'DM Sans', sans-serif",
-      fontSize: "14px",
+      fontSize: "13px",
       width: "100%",
       boxSizing: "border-box",
-      marginTop: "6px",
     };
 
     const labels = ["Most recent period", "Period before that", "One before that"];
-    const sublabels = ["Required", "Optional — improves predictions", "Optional — improves predictions"];
+    const required = [true, false, false];
+    const previewDay = getCurrentCycleDay();
 
     return (
-      <div style={{ position: "fixed", inset: 0, background: "rgba(45,34,20,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-        <div style={{ background: "#faf6ee", borderRadius: "24px", padding: "28px 24px", maxWidth: "360px", width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", border: "1px solid #ddd0b8" }}>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(45,34,20,0.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", overflowY: "auto" }}>
+        <div style={{ background: "#faf6ee", borderRadius: "24px", padding: "24px 20px", maxWidth: "360px", width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", border: "1px solid #ddd0b8" }}>
+
           {/* Header */}
-          <div style={{ textAlign: "center", marginBottom: "24px" }}>
-            <div style={{ fontSize: "32px", marginBottom: "8px" }}>🌸</div>
-            <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#6b4f7a", margin: "0 0 6px", fontFamily: "'DM Sans', sans-serif" }}>Welcome to Juno</h2>
-            <p style={{ fontSize: "13px", color: "#8a7e6a", lineHeight: 1.6, margin: 0 }}>
-              To get started, enter your recent period dates. This helps Juno understand your cycle right away.
+          <div style={{ textAlign: "center", marginBottom: "20px" }}>
+            <div style={{ fontSize: "30px", marginBottom: "8px" }}>🌸</div>
+            <h2 style={{ fontSize: "19px", fontWeight: "700", color: "#6b4f7a", margin: "0 0 6px", fontFamily: "'DM Sans', sans-serif" }}>Welcome to Juno</h2>
+            <p style={{ fontSize: "12px", color: "#8a7e6a", lineHeight: 1.6, margin: 0 }}>
+              Enter your recent period dates so Juno can work out where you are in your cycle today.
             </p>
           </div>
 
-          {/* Cycle inputs */}
+          {/* Live cycle day preview */}
+          {previewDay && (
+            <div style={{ background: "rgba(107,79,122,0.08)", border: "1px solid rgba(107,79,122,0.2)", borderRadius: "12px", padding: "10px 14px", marginBottom: "16px", textAlign: "center" }}>
+              <div style={{ fontSize: "11px", color: "#8a7e6a", textTransform: "uppercase", letterSpacing: "1px", fontWeight: "600" }}>Based on your dates</div>
+              <div style={{ fontSize: "22px", fontWeight: "700", color: "#6b4f7a", marginTop: "2px" }}>You are on cycle day {previewDay}</div>
+            </div>
+          )}
+
+          {/* Period inputs */}
           {cycleInputs.map((c, i) => (
-            <div key={i} style={{ marginBottom: "16px" }}>
-              <div style={{ fontSize: "12px", fontWeight: "700", color: "#6b4f7a", textTransform: "uppercase", letterSpacing: "1px" }}>{labels[i]}</div>
-              <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "2px" }}>{sublabels[i]}</div>
+            <div key={i} style={{ marginBottom: "14px", background: i === 0 ? "#fff" : "transparent", borderRadius: "12px", padding: i === 0 ? "12px" : "0", border: i === 0 ? "1px solid #e8ddd0" : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <div style={{ fontSize: "11px", fontWeight: "700", color: i === 0 ? "#6b4f7a" : "#8a7e6a", textTransform: "uppercase", letterSpacing: "1px" }}>{labels[i]}</div>
+                {required[i] ? (
+                  <span style={{ fontSize: "9px", background: "rgba(192,57,79,0.1)", color: "#c0394f", borderRadius: "6px", padding: "2px 6px", fontWeight: "700" }}>Required</span>
+                ) : (
+                  <span style={{ fontSize: "9px", color: "#b0a090" }}>Optional</span>
+                )}
+              </div>
               <div style={{ display: "flex", gap: "8px" }}>
-                <div style={{ flex: 2 }}>
-                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "2px" }}>Start date</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "3px" }}>Start date</div>
                   <input
                     type="date"
                     max={new Date().toISOString().split("T")[0]}
@@ -533,18 +576,27 @@ export default function App() {
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "2px" }}>Length</div>
-                  <select
-                    value={c.length}
-                    onChange={e => updateInput(i, "length", e.target.value)}
-                    style={{ ...inputStyle, appearance: "none" }}
-                  >
-                    {Array.from({ length: 15 }, (_, i) => i + 21).map(n => (
-                      <option key={n} value={n}>{n} days</option>
-                    ))}
-                  </select>
+                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "3px" }}>End date</div>
+                  <input
+                    type="date"
+                    max={new Date().toISOString().split("T")[0]}
+                    min={c.startDate || ""}
+                    value={c.endDate}
+                    onChange={e => updateInput(i, "endDate", e.target.value)}
+                    style={{ ...inputStyle, opacity: c.startDate ? 1 : 0.5 }}
+                    disabled={!c.startDate}
+                  />
                 </div>
               </div>
+              {/* Show period length preview */}
+              {c.startDate && c.endDate && (() => {
+                const len = Math.floor((new Date(c.endDate) - new Date(c.startDate)) / (1000 * 60 * 60 * 24)) + 1;
+                return len > 0 ? (
+                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginTop: "5px" }}>
+                    {len} day period
+                  </div>
+                ) : null;
+              })()}
             </div>
           ))}
 
@@ -556,12 +608,12 @@ export default function App() {
 
           <button
             onClick={handleFinish}
-            style={{ width: "100%", background: "linear-gradient(135deg, #8a6a9a, #6b4f7a)", border: "none", borderRadius: "14px", color: "white", padding: "14px", fontSize: "15px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: "0 4px 14px rgba(107,79,122,0.35)", marginBottom: "10px" }}
+            style={{ width: "100%", background: "linear-gradient(135deg, #8a6a9a, #6b4f7a)", border: "none", borderRadius: "14px", color: "white", padding: "14px", fontSize: "15px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: "0 4px 14px rgba(107,79,122,0.3)", marginBottom: "10px" }}
           >
             Start tracking →
           </button>
           <div style={{ textAlign: "center", fontSize: "11px", color: "#8a7e6a" }}>
-            You can always update this in the Log tab
+            You can always add more detail in the Log tab
           </div>
         </div>
       </div>
