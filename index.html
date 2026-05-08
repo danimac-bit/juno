@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- App identity -->
+    <title>Juno — Cycle Health</title>
+    <meta name="description" content="Juno — cycle health, understood. Track your period, symptoms and patterns." />
+
+    <!-- PWA / Home Screen support -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Juno" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#f5f0e8" />
+
+    <!-- Home screen icons (you can replace these with your own) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
+
+    <!-- PWA manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; overflow: hidden; }
+      body {
+        font-family: 'DM Sans', 'Helvetica Neue', sans-serif;
+        background: #f5f0e8;
+        -webkit-font-smoothing: antialiased;
+        -webkit-tap-highlight-color: transparent;
+        overscroll-behavior: none;
+      }
+      #root { height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+      /* Safe area padding for iPhone notch / home bar */
+      #root { padding-top: env(safe-area-inset-top); }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
