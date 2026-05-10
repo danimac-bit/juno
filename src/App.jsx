@@ -1,3 +1,4 @@
+// JUNO v2.0 - 2026-05-10 09:42
 import { useState, useEffect } from "react";
 
 // Load DM Sans font
@@ -299,9 +300,27 @@ export default function App() {
   function saveLog() {
     setCycles((prev) => {
       const updated = [...prev];
-      const last = { ...updated[updated.length - 1] };
-      last.entries = { ...last.entries, [selectedDate]: { ...logEntry } };
-      updated[updated.length - 1] = last;
+      // Find which cycle this date belongs to
+      let targetIdx = updated.length - 1; // default to latest
+      for (let i = 0; i < updated.length; i++) {
+        const cycleStart = new Date(updated[i].startDate);
+        const nextStart = updated[i + 1] ? new Date(updated[i + 1].startDate) : null;
+        const selDate = new Date(selectedDate);
+        if (selDate >= cycleStart && (!nextStart || selDate < nextStart)) {
+          targetIdx = i;
+          break;
+        }
+      }
+      const target = { ...updated[targetIdx] };
+      // If clearing flow completely, remove the entry if no other data
+      const newEntry = { ...logEntry };
+      if (!newEntry.flow && newEntry.symptoms.length === 0 && !newEntry.notes) {
+        const { [selectedDate]: _, ...rest } = target.entries;
+        target.entries = rest;
+      } else {
+        target.entries = { ...target.entries, [selectedDate]: newEntry };
+      }
+      updated[targetIdx] = target;
       return updated;
     });
     setShowLogSaved(true);
@@ -517,15 +536,19 @@ export default function App() {
     }
 
     const inputStyle = {
-      background: "#ffffff",
+      background: "#f8f4ee",
       border: "1px solid #ddd0b8",
-      borderRadius: "10px",
+      borderRadius: "8px",
       color: "#3e3428",
-      padding: "10px 12px",
+      padding: "7px 6px",
       fontFamily: "'DM Sans', sans-serif",
-      fontSize: "13px",
+      fontSize: "11px",
       width: "100%",
+      maxWidth: "100%",
       boxSizing: "border-box",
+      minWidth: 0,
+      display: "block",
+      overflow: "hidden",
     };
 
     const labels = ["Most recent period", "Period before that", "One before that"];
@@ -533,40 +556,40 @@ export default function App() {
     const previewDay = getCurrentCycleDay();
 
     return (
-      <div style={{ position: "fixed", inset: 0, background: "rgba(45,34,20,0.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", overflowY: "auto" }}>
-        <div style={{ background: "#faf6ee", borderRadius: "24px", padding: "24px 20px", maxWidth: "360px", width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", border: "1px solid #ddd0b8" }}>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(45,34,20,0.6)", zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "12px", overflowY: "auto", WebkitOverflowScrolling: "touch", boxSizing: "border-box" }}>
+        <div style={{ background: "#faf6ee", borderRadius: "20px", padding: "20px 14px 16px", maxWidth: "100%", width: "calc(100% - 0px)", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", border: "1px solid #ddd0b8", marginTop: "8px", marginBottom: "8px", boxSizing: "border-box", overflow: "hidden" }}>
 
           {/* Header */}
-          <div style={{ textAlign: "center", marginBottom: "20px" }}>
-            <div style={{ fontSize: "30px", marginBottom: "8px" }}>🌸</div>
-            <h2 style={{ fontSize: "19px", fontWeight: "700", color: "#6b4f7a", margin: "0 0 6px", fontFamily: "'DM Sans', sans-serif" }}>Welcome to Juno</h2>
-            <p style={{ fontSize: "12px", color: "#8a7e6a", lineHeight: 1.6, margin: 0 }}>
-              Enter your recent period dates so Juno can work out where you are in your cycle today.
+          <div style={{ textAlign: "center", marginBottom: "14px" }}>
+            <div style={{ fontSize: "26px", marginBottom: "4px" }}>🌸</div>
+            <h2 style={{ fontSize: "17px", fontWeight: "700", color: "#6b4f7a", margin: "0 0 4px", fontFamily: "'DM Sans', sans-serif" }}>Welcome to juno</h2>
+            <p style={{ fontSize: "11px", color: "#8a7e6a", lineHeight: 1.5, margin: 0 }}>
+              Enter your recent period dates so juno can work out where you are in your cycle today.
             </p>
           </div>
 
           {/* Live cycle day preview */}
           {previewDay && (
-            <div style={{ background: "rgba(107,79,122,0.08)", border: "1px solid rgba(107,79,122,0.2)", borderRadius: "12px", padding: "10px 14px", marginBottom: "16px", textAlign: "center" }}>
-              <div style={{ fontSize: "11px", color: "#8a7e6a", textTransform: "uppercase", letterSpacing: "1px", fontWeight: "600" }}>Based on your dates</div>
-              <div style={{ fontSize: "22px", fontWeight: "700", color: "#6b4f7a", marginTop: "2px" }}>You are on cycle day {previewDay}</div>
+            <div style={{ background: "rgba(107,79,122,0.08)", border: "1px solid rgba(107,79,122,0.2)", borderRadius: "10px", padding: "8px 12px", marginBottom: "12px", textAlign: "center" }}>
+              <div style={{ fontSize: "10px", color: "#8a7e6a", textTransform: "uppercase", letterSpacing: "1px", fontWeight: "600" }}>Based on your dates</div>
+              <div style={{ fontSize: "18px", fontWeight: "700", color: "#6b4f7a", marginTop: "1px" }}>You are on cycle day {previewDay}</div>
             </div>
           )}
 
           {/* Period inputs */}
           {cycleInputs.map((c, i) => (
-            <div key={i} style={{ marginBottom: "14px", background: i === 0 ? "#fff" : "transparent", borderRadius: "12px", padding: i === 0 ? "12px" : "0", border: i === 0 ? "1px solid #e8ddd0" : "none" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <div style={{ fontSize: "11px", fontWeight: "700", color: i === 0 ? "#6b4f7a" : "#8a7e6a", textTransform: "uppercase", letterSpacing: "1px" }}>{labels[i]}</div>
+            <div key={i} style={{ marginBottom: "10px", background: "#fff", borderRadius: "10px", padding: "10px", border: "1px solid #e8ddd0", overflow: "hidden", boxSizing: "border-box", width: "100%" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                <div style={{ fontSize: "10px", fontWeight: "700", color: i === 0 ? "#6b4f7a" : "#8a7e6a", textTransform: "uppercase", letterSpacing: "0.8px" }}>{labels[i]}</div>
                 {required[i] ? (
                   <span style={{ fontSize: "9px", background: "rgba(192,57,79,0.1)", color: "#c0394f", borderRadius: "6px", padding: "2px 6px", fontWeight: "700" }}>Required</span>
                 ) : (
                   <span style={{ fontSize: "9px", color: "#b0a090" }}>Optional</span>
                 )}
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "3px" }}>Start date</div>
+              <div style={{ display: "flex", gap: "6px", width: "100%", boxSizing: "border-box" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "9px", color: "#8a7e6a", marginBottom: "2px" }}>Start date</div>
                   <input
                     type="date"
                     max={new Date().toISOString().split("T")[0]}
@@ -575,8 +598,8 @@ export default function App() {
                     style={inputStyle}
                   />
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginBottom: "3px" }}>End date</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "9px", color: "#8a7e6a", marginBottom: "2px" }}>End date</div>
                   <input
                     type="date"
                     max={new Date().toISOString().split("T")[0]}
@@ -592,7 +615,7 @@ export default function App() {
               {c.startDate && c.endDate && (() => {
                 const len = Math.floor((new Date(c.endDate) - new Date(c.startDate)) / (1000 * 60 * 60 * 24)) + 1;
                 return len > 0 ? (
-                  <div style={{ fontSize: "10px", color: "#8a7e6a", marginTop: "5px" }}>
+                  <div style={{ fontSize: "9px", color: "#8a7e6a", marginTop: "4px" }}>
                     {len} day period
                   </div>
                 ) : null;
@@ -608,11 +631,11 @@ export default function App() {
 
           <button
             onClick={handleFinish}
-            style={{ width: "100%", background: "linear-gradient(135deg, #8a6a9a, #6b4f7a)", border: "none", borderRadius: "14px", color: "white", padding: "14px", fontSize: "15px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: "0 4px 14px rgba(107,79,122,0.3)", marginBottom: "10px" }}
+            style={{ width: "100%", background: "linear-gradient(135deg, #8a6a9a, #6b4f7a)", border: "none", borderRadius: "12px", color: "white", padding: "12px", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: "0 4px 14px rgba(107,79,122,0.3)", marginBottom: "8px", marginTop: "4px" }}
           >
             Start tracking →
           </button>
-          <div style={{ textAlign: "center", fontSize: "11px", color: "#8a7e6a" }}>
+          <div style={{ textAlign: "center", fontSize: "10px", color: "#8a7e6a" }}>
             You can always add more detail in the Log tab
           </div>
         </div>
@@ -792,7 +815,7 @@ export default function App() {
     return (
       <div>
         <div style={styles.header}>
-          <h1 style={styles.title}>Juno</h1>
+          <h1 style={styles.title}>juno</h1>
           <p style={styles.subtitle}>Cycle health, understood</p>
         </div>
         <AdBanner />
@@ -937,11 +960,33 @@ export default function App() {
   // LOG VIEW
   function LogView() {
     const cd = getCycleDay(selectedDate);
+
+    // Find which cycle this date belongs to
+    function getDateCycleInfo() {
+      for (let i = 0; i < cycles.length; i++) {
+        const cycleStart = new Date(cycles[i].startDate);
+        const nextStart = cycles[i + 1] ? new Date(cycles[i + 1].startDate) : null;
+        const selDate = new Date(selectedDate);
+        if (selDate >= cycleStart && (!nextStart || selDate < nextStart)) {
+          const dayNum = Math.floor((selDate - cycleStart) / (1000 * 60 * 60 * 24)) + 1;
+          return { cycleIdx: i, dayNum, isCurrentCycle: i === cycles.length - 1 };
+        }
+      }
+      return null;
+    }
+
+    const cycleInfo = getDateCycleInfo();
+    const isPastCycle = cycleInfo && !cycleInfo.isCurrentCycle;
+
     return (
       <div>
         <div style={styles.header}>
           <h1 style={styles.title}>Log</h1>
-          <p style={styles.subtitle}>{selectedDate}{cd ? ` · Day ${cd}` : ""}</p>
+          <p style={styles.subtitle}>
+            {selectedDate}
+            {cycleInfo ? ` · Day ${cycleInfo.dayNum}` : ""}
+            {isPastCycle ? ` · Cycle ${cycleInfo.cycleIdx + 1}` : ""}
+          </p>
         </div>
         <AdBanner />
         <div style={styles.card}>
@@ -984,9 +1029,14 @@ export default function App() {
             style={{ background: "#f5f0e6", border: "1px solid #eddde6", borderRadius: "10px", color: "#1a1628", padding: "10px", fontFamily: "'DM Sans', sans-serif", fontSize: "13px", width: "100%", boxSizing: "border-box", minHeight: "80px", resize: "vertical" }}
           />
         </div>
+        {isPastCycle && (
+          <div style={{ margin: "0 16px 8px", background: "#f5f0e8", borderRadius: "10px", padding: "10px 14px", fontSize: "12px", color: "#8a7e6a", border: "1px solid #e8ddd0" }}>
+            ✏️ Editing <strong>Cycle {cycleInfo.cycleIdx + 1}, Day {cycleInfo.dayNum}</strong> — changes will update your history and recalculate predictions.
+          </div>
+        )}
         <div style={{ padding: "0 16px 16px", textAlign: "center" }}>
           <button style={{ ...styles.btn, width: "100%" }} onClick={saveLog}>
-            {showLogSaved ? "✓ Saved!" : "Save Entry"}
+            {showLogSaved ? "✓ Saved!" : isPastCycle ? "Update Entry" : "Save Entry"}
           </button>
         </div>
       </div>
@@ -1233,7 +1283,7 @@ export default function App() {
 
         {!isPremium && (
           <div style={{ ...styles.card, textAlign: "center", border: "1.5px solid #eddde6" }}>
-            <p style={{ color: "#8a7e6a", fontSize: "13px" }}>Go ad-free and support Juno</p>
+            <p style={{ color: "#8a7e6a", fontSize: "13px" }}>Go ad-free and support juno</p>
             <button style={styles.btn} onClick={() => setShowPremium(true)}>Remove Ads — $2.99</button>
           </div>
         )}
@@ -1428,7 +1478,7 @@ export default function App() {
           <div style={{ background: "#f5f0e6", borderRadius: "10px", padding: "12px 14px", marginBottom: "14px" }}>
             <div style={{ fontSize: "13px", fontWeight: "600", color: "#1a1628", marginBottom: "4px" }}>🔒 Your data stays on your device</div>
             <div style={{ fontSize: "12px", color: "#8a7e6a", lineHeight: 1.6 }}>
-              Juno never uploads, sells, or shares your health data. Everything you log is stored locally on this device only. Clearing the app storage will permanently delete your data.
+              juno never uploads, sells, or shares your health data. Everything you log is stored locally on this device only. Clearing the app storage will permanently delete your data.
             </div>
           </div>
           <Row label="Clear all data" sublabel="Permanently delete all cycle history">
@@ -1452,19 +1502,19 @@ export default function App() {
         {/* Premium */}
         {!isPremium ? (
           <div style={{ ...styles.card, textAlign: "center", border: "1.5px solid #eddde6" }}>
-            <p style={{ color: "#8a7e6a", fontSize: "13px", marginBottom: "12px" }}>Remove all ads and support Juno</p>
+            <p style={{ color: "#8a7e6a", fontSize: "13px", marginBottom: "12px" }}>Remove all ads and support juno</p>
             <button style={styles.btn} onClick={() => setShowPremium(true)}>Remove Ads — $2.99</button>
           </div>
         ) : (
           <div style={{ ...styles.card, textAlign: "center", background: "#f5f0e6" }}>
             <div style={{ fontSize: "20px", marginBottom: "6px" }}>✦</div>
             <div style={{ fontSize: "13px", fontWeight: "600", color: "#6b4f7a" }}>Ad-free</div>
-            <div style={{ fontSize: "12px", color: "#8a7e6a", marginTop: "2px" }}>Thank you for supporting Juno</div>
+            <div style={{ fontSize: "12px", color: "#8a7e6a", marginTop: "2px" }}>Thank you for supporting juno</div>
           </div>
         )}
 
         <div style={{ textAlign: "center", padding: "12px 16px 4px", fontSize: "11px", color: "#a090c0" }}>
-          Juno v1.0 · Made with care for your health
+          juno v1.0 · Made with care for your health
         </div>
       </div>
     );
