@@ -823,16 +823,15 @@ export default function App() {
     function EnergyWave({ cycleDay, cycleLen }) {
       const W = 320, H = 96, PAD = 18;
       const drawW = W - PAD * 2;
+      const [dragDay, setDragDay] = useState(null);
 
       function getEnergy(t) {
-        // Smooth continuous curve using sinusoidal blend
-        if (t < 0.18) return 0.22 - t * 0.9;            // menstrual: gentle dip
-        if (t < 0.45) return 0.06 + Math.sin(((t - 0.18) / 0.27) * Math.PI * 0.5) * 0.82; // follicular: smooth rise
-        if (t < 0.55) return 0.88 + Math.sin(((t - 0.45) / 0.10) * Math.PI) * 0.11;        // ovulation: rounded peak
-        return 0.99 - Math.sin(((t - 0.55) / 0.45) * Math.PI * 0.5) * 0.88;               // luteal: smooth fall
+        if (t < 0.18) return 0.22 - t * 0.9;
+        if (t < 0.45) return 0.06 + Math.sin(((t - 0.18) / 0.27) * Math.PI * 0.5) * 0.82;
+        if (t < 0.55) return 0.88 + Math.sin(((t - 0.45) / 0.10) * Math.PI) * 0.11;
+        return 0.99 - Math.sin(((t - 0.55) / 0.45) * Math.PI * 0.5) * 0.88;
       }
 
-      // Build points
       const pts = Array.from({ length: cycleLen }, (_, i) => {
         const t = i / (cycleLen - 1);
         const x = PAD + t * drawW;
@@ -840,14 +839,12 @@ export default function App() {
         return [x, y];
       });
 
-      // Convert points to smooth cubic bezier path
       function smoothPath(points) {
         if (points.length < 2) return "";
         let d = `M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`;
         for (let i = 0; i < points.length - 1; i++) {
           const [x0, y0] = points[i];
           const [x1, y1] = points[i + 1];
-          // Control points: 1/3 of the distance ahead
           const cpx = x0 + (x1 - x0) * 0.4;
           const cpx2 = x0 + (x1 - x0) * 0.6;
           d += ` C${cpx.toFixed(1)},${y0.toFixed(1)} ${cpx2.toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
@@ -858,92 +855,159 @@ export default function App() {
       const curvePath = smoothPath(pts);
       const fillPath = curvePath + ` L${pts[pts.length-1][0]},${H} L${PAD},${H} Z`;
 
-      const markerIdx = cycleDay ? Math.min(cycleDay - 1, cycleLen - 1) : null;
-      const markerPt = markerIdx !== null ? pts[markerIdx] : null;
-      const markerColor = phase === "menstrual" ? "#c0394f" : phase === "follicular" ? "#b8820a" : phase === "ovulation" ? "#c07010" : "#6b3a8a";
+      const activeDay = dragDay !== null ? dragDay : (cycleDay || 1);
+      const markerIdx = Math.min(activeDay - 1, cycleLen - 1);
+      const markerPt = pts[markerIdx];
 
-      // Phase bands — x ranges for background glows
+      function getPhaseForDay(day) {
+        const t = (day - 1) / Math.max(cycleLen - 1, 1);
+        if (t < 0.18) return { name: "Menstrual", color: "#c0394f", emoji: "\uD83E\uDE78" };
+        if (t < 0.45) return { name: "Follicular", color: "#b8820a", emoji: "\uD83C\uDF31" };
+        if (t < 0.55) return { name: "Ovulation", color: "#c07010", emoji: "\u2728" };
+        return { name: "Luteal", color: "#6b3a8a", emoji: "\uD83C\uDF19" };
+      }
+
+      const activePhase = getPhaseForDay(activeDay);
+      const markerColor = activePhase.color;
+      const isDragging = dragDay !== null;
+
+      function getCalendarDate(day) {
+        if (!latestCycle || !latestCycle.startDate) return null;
+        const start = new Date(latestCycle.startDate);
+        start.setDate(start.getDate() + day - 1);
+        return start.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+      }
+
+      function xToDay(svgX) {
+        const clamped = Math.max(PAD, Math.min(PAD + drawW, svgX));
+        const t = (clamped - PAD) / drawW;
+        return Math.max(1, Math.min(cycleLen, Math.round(t * (cycleLen - 1)) + 1));
+      }
+
+      function getSVGPoint(e, svgEl) {
+        const rect = svgEl.getBoundingClientRect();
+        const scaleX = W / rect.width;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        return (clientX - rect.left) * scaleX;
+      }
+
+      function handleDragStart(e) {
+        e.preventDefault();
+        const svgEl = e.currentTarget;
+        const x = getSVGPoint(e, svgEl);
+        setDragDay(xToDay(x));
+        function onMove(ev) {
+          ev.preventDefault();
+          setDragDay(xToDay(getSVGPoint(ev, svgEl)));
+        }
+        function onEnd() {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("touchmove", onMove);
+          document.removeEventListener("mouseup", onEnd);
+          document.removeEventListener("touchend", onEnd);
+          setTimeout(() => setDragDay(null), 2000);
+        }
+        document.addEventListener("mousemove", onMove, { passive: false });
+        document.addEventListener("touchmove", onMove, { passive: false });
+        document.addEventListener("mouseup", onEnd);
+        document.addEventListener("touchend", onEnd);
+      }
+
       const bands = [
-        { label: "Menstrual", t0: 0,    t1: 0.18, color: "#c0394f", labelT: 0.09 },
-        { label: "Follicular", t0: 0.18, t1: 0.45, color: "#b8820a", labelT: 0.31 },
-        { label: "Ovulation",  t0: 0.45, t1: 0.55, color: "#c07010", labelT: 0.50 },
-        { label: "Luteal",     t0: 0.55, t1: 1.0,  color: "#6b3a8a", labelT: 0.74 },
+        { label: "Menstrual", color: "#c0394f", labelT: 0.09 },
+        { label: "Follicular", color: "#b8820a", labelT: 0.31 },
+        { label: "Ovulation", color: "#c07010", labelT: 0.50 },
+        { label: "Luteal", color: "#6b3a8a", labelT: 0.74 },
       ];
 
+      const calDate = getCalendarDate(activeDay);
+      const tooltipW = 96;
+      let tooltipX = markerPt[0] - tooltipW / 2;
+      if (tooltipX < PAD) tooltipX = PAD;
+      if (tooltipX + tooltipW > W - PAD) tooltipX = W - PAD - tooltipW;
+
       return (
-        <svg width="100%" viewBox={`0 0 ${W} ${H + 26}`} style={{ overflow: "visible" }}>
-          <defs>
-            <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%"   stopColor="#c0394f" stopOpacity="0.85"/>
-              <stop offset="18%"  stopColor="#c0394f" stopOpacity="0.7"/>
-              <stop offset="45%"  stopColor="#b8820a" stopOpacity="0.75"/>
-              <stop offset="55%"  stopColor="#c07010" stopOpacity="0.9"/>
-              <stop offset="100%" stopColor="#6b3a8a" stopOpacity="0.75"/>
-            </linearGradient>
-            <linearGradient id="phaseGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%"   stopColor="#c0394f" stopOpacity="0.16"/>
-              <stop offset="14%"  stopColor="#6b4f7a" stopOpacity="0.10"/>
-              <stop offset="28%"  stopColor="#6b4f7a" stopOpacity="0.0"/>
-              <stop offset="42%"  stopColor="#c87840" stopOpacity="0.0"/>
-              <stop offset="50%"  stopColor="#c87840" stopOpacity="0.14"/>
-              <stop offset="58%"  stopColor="#c87840" stopOpacity="0.0"/>
-              <stop offset="68%"  stopColor="#6b3a8a" stopOpacity="0.0"/>
-              <stop offset="82%"  stopColor="#6b3a8a" stopOpacity="0.12"/>
-              <stop offset="100%" stopColor="#6b3a8a" stopOpacity="0.08"/>
-            </linearGradient>
-            <linearGradient id="phaseGlowFade" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%"   stopColor="white" stopOpacity="1"/>
-              <stop offset="100%" stopColor="white" stopOpacity="0"/>
-            </linearGradient>
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <div>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#3e3428" }}>Energy across your cycle</div>
+              <div style={{ fontSize: "10px", color: "#8a7e6a", marginTop: "1px" }}>Drag the dot to explore any day</div>
+            </div>
+            <div style={{ fontSize: "9px", color: "#8a7e6a", textAlign: "right", lineHeight: 1.5 }}>low<br/>↕<br/>high</div>
+          </div>
 
-          </defs>
+          <svg width="100%" viewBox={`0 0 ${W} ${H + 28}`} style={{ overflow: "visible", touchAction: "none", cursor: "ew-resize", userSelect: "none" }}
+            onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
+            <defs>
+              <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%"   stopColor="#c0394f" stopOpacity="0.85"/>
+                <stop offset="18%"  stopColor="#c0394f" stopOpacity="0.7"/>
+                <stop offset="45%"  stopColor="#b8820a" stopOpacity="0.75"/>
+                <stop offset="55%"  stopColor="#c07010" stopOpacity="0.9"/>
+                <stop offset="100%" stopColor="#6b3a8a" stopOpacity="0.75"/>
+              </linearGradient>
+              <linearGradient id="phaseGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%"   stopColor="#c0394f" stopOpacity="0.16"/>
+                <stop offset="14%"  stopColor="#6b4f7a" stopOpacity="0.10"/>
+                <stop offset="28%"  stopColor="#6b4f7a" stopOpacity="0.0"/>
+                <stop offset="42%"  stopColor="#c87840" stopOpacity="0.0"/>
+                <stop offset="50%"  stopColor="#c87840" stopOpacity="0.14"/>
+                <stop offset="58%"  stopColor="#c87840" stopOpacity="0.0"/>
+                <stop offset="68%"  stopColor="#6b3a8a" stopOpacity="0.0"/>
+                <stop offset="82%"  stopColor="#6b3a8a" stopOpacity="0.12"/>
+                <stop offset="100%" stopColor="#6b3a8a" stopOpacity="0.08"/>
+              </linearGradient>
+            </defs>
 
-          {/* Phase background — smooth horizontal colour fade */}
-          <rect x={PAD} y={0} width={drawW} height={H}
-            fill="url(#phaseGlow)" rx="4" opacity="1"/>
+            <rect x={PAD} y={0} width={drawW} height={H} fill="url(#phaseGlow)" rx="4"/>
+            <path d={fillPath} fill="url(#waveGrad)" opacity="0.18"/>
+            <path d={curvePath} stroke="url(#waveGrad)" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
 
-          {/* Soft fill under curve */}
-          <path d={fillPath} fill="url(#waveGrad)" opacity="0.18"/>
+            {(() => {
+              const peakIdx = Math.round(cycleLen * 0.5);
+              const [px, py] = pts[peakIdx] || [0, 0];
+              return (
+                <g>
+                  <circle cx={px} cy={py} r="6" fill="#c87840" opacity="0.12"/>
+                  <circle cx={px} cy={py} r="3.5" fill="#c87840" opacity="0.65"/>
+                </g>
+              );
+            })()}
 
-          {/* The smooth wave */}
-          <path d={curvePath} stroke="url(#waveGrad)" strokeWidth="1.8"
-            fill="none" strokeLinecap="round"/>
+            {bands.map(b => (
+              <text key={b.label} x={PAD + b.labelT * drawW} y={H + 20}
+                fontSize="8.5" fill={b.color} textAnchor="middle" opacity="0.85"
+                fontFamily="DM Sans, Helvetica Neue, sans-serif" fontWeight="500">
+                {b.label}
+              </text>
+            ))}
 
-          {/* Ovulation peak dot */}
-          {(() => {
-            const peakIdx = Math.round(cycleLen * 0.5);
-            const [px, py] = pts[peakIdx] || [0, 0];
-            return (
-              <g>
-                <circle cx={px} cy={py} r="6" fill="#c87840" opacity="0.12"/>
-                <circle cx={px} cy={py} r="3.5" fill="#c87840" opacity="0.65"/>
+            {markerPt && (
+              <g style={{ cursor: "ew-resize" }}>
+                <line x1={markerPt[0]} y1={markerPt[1] + 7} x2={markerPt[0]} y2={H - 1}
+                  stroke={markerColor} strokeWidth="1.5" strokeDasharray="3,3" opacity="0.45"/>
+                <rect x={tooltipX} y={markerPt[1] - 44} width={tooltipW} height={28}
+                  rx="7" fill={markerColor} opacity="0.93"/>
+                <text x={tooltipX + tooltipW / 2} y={markerPt[1] - 32}
+                  fontSize="8.5" fill="white" textAnchor="middle"
+                  fontFamily="DM Sans, sans-serif" fontWeight="700">
+                  {isDragging ? `${activePhase.emoji} ${activePhase.name}` : "you are here ✶"}
+                </text>
+                <text x={tooltipX + tooltipW / 2} y={markerPt[1] - 21}
+                  fontSize="7.5" fill="white" textAnchor="middle" opacity="0.88"
+                  fontFamily="DM Sans, sans-serif">
+                  {calDate ? `Day ${activeDay} · ${calDate}` : `Day ${activeDay}`}
+                </text>
+                <polygon
+                  points={`${markerPt[0] - 5},${markerPt[1] - 17} ${markerPt[0] + 5},${markerPt[1] - 17} ${markerPt[0]},${markerPt[1] - 11}`}
+                  fill={markerColor} opacity="0.93"/>
+                <circle cx={markerPt[0]} cy={markerPt[1]} r={isDragging ? 12 : 9} fill={markerColor} opacity="0.14"/>
+                <circle cx={markerPt[0]} cy={markerPt[1]} r={isDragging ? 7 : 5} fill={markerColor} opacity="0.92"/>
+                <circle cx={markerPt[0]} cy={markerPt[1]} r="2.5" fill="white" opacity="0.95"/>
               </g>
-            );
-          })()}
-
-          {/* Phase labels */}
-          {bands.map(b => (
-            <text key={b.label}
-              x={PAD + b.labelT * drawW} y={H + 20}
-              fontSize="8.5" fill={b.color} textAnchor="middle" opacity="0.85"
-              fontFamily="DM Sans, Helvetica Neue, sans-serif" fontWeight="500">
-              {b.label}
-            </text>
-          ))}
-
-          {/* You marker */}
-          {markerPt && (
-            <g>
-              <line x1={markerPt[0]} y1={markerPt[1] + 7} x2={markerPt[0]} y2={H - 1}
-                stroke={markerColor} strokeWidth="1.5" strokeDasharray="3,3" opacity="0.45"/>
-              <circle cx={markerPt[0]} cy={markerPt[1]} r="9" fill={markerColor} opacity="0.12"/>
-              <circle cx={markerPt[0]} cy={markerPt[1]} r="5" fill={markerColor} opacity="0.9"/>
-              <circle cx={markerPt[0]} cy={markerPt[1]} r="2.2" fill="white" opacity="0.95"/>
-              <text x={markerPt[0]} y={markerPt[1] - 13} fontSize="8" fill={markerColor}
-                textAnchor="middle" fontFamily="DM Sans, sans-serif" fontWeight="700">you</text>
-            </g>
-          )}
-        </svg>
+            )}
+          </svg>
+        </div>
       );
     }
 
@@ -997,9 +1061,6 @@ export default function App() {
             <div style={{ height: "1px", background: `linear-gradient(90deg, transparent, ${p.color}25, transparent)`, margin: "0 16px" }} />
 
             <div style={{ padding: "14px 12px 10px" }}>
-              <div style={{ fontSize: "10px", color: "#8a7e6a", letterSpacing: "1.5px", textTransform: "uppercase", marginBottom: "8px", fontWeight: "600" }}>
-                Your energy this cycle
-              </div>
               <EnergyWave cycleDay={cycleDay} cycleLen={cycleLen} />
             </div>
 
