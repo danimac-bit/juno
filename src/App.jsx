@@ -221,10 +221,17 @@ export default function App() {
   const latestCycle = cycles[cycles.length - 1];
 
   useEffect(() => {
-    const entry = latestCycle?.entries?.[selectedDate];
+    // Search all cycles for an entry on the selected date, not just the latest
+    let entry = null;
+    for (const cycle of cycles) {
+      if (cycle.entries && cycle.entries[selectedDate]) {
+        entry = cycle.entries[selectedDate];
+        break;
+      }
+    }
     if (entry) setLogEntry({ ...entry });
     else setLogEntry({ symptoms: [], flow: null, notes: "" });
-  }, [selectedDate]);
+  }, [selectedDate, cycles]);
 
   function getCycleDay(dateStr) {
     if (!latestCycle) return null;
@@ -672,33 +679,57 @@ export default function App() {
     const [adding, setAdding] = useState(false);
     const [text, setText] = useState("");
 
+    // Global custom symptom registry — persists across sessions
+    const [customRegistry, setCustomRegistry] = useState(() => {
+      try { return JSON.parse(localStorage.getItem("juno_custom_symptoms") || "{}"); } catch { return {}; }
+    });
+
+    function saveRegistry(reg) {
+      setCustomRegistry(reg);
+      localStorage.setItem("juno_custom_symptoms", JSON.stringify(reg));
+    }
+
     function handleAdd() {
       const trimmed = text.trim();
       if (!trimmed) return;
       const customId = "custom_" + trimmed.toLowerCase().replace(/\s+/g, "_");
+      // Save to global registry
+      const newReg = { ...customRegistry, [customId]: { label: trimmed, emoji: "✦" } };
+      saveRegistry(newReg);
+      // Add to current log entry
       setLogEntry(p => ({
         ...p,
         symptoms: p.symptoms.includes(customId) ? p.symptoms : [...p.symptoms, customId],
-        customSymptoms: { ...(p.customSymptoms || {}), [customId]: trimmed },
       }));
       setText("");
       setAdding(false);
     }
 
-    // Show existing custom symptoms
-    const customSymptoms = logEntry.customSymptoms || {};
-    const customIds = logEntry.symptoms.filter(s => s.startsWith("custom_"));
+    // All known custom symptom ids from the registry
+    const allCustomIds = Object.keys(customRegistry);
+    // Which ones are currently selected in this log entry
+    const selectedCustomIds = logEntry.symptoms.filter(s => s.startsWith("custom_"));
 
     return (
       <div>
-        {customIds.length > 0 && (
+        {/* Show all known custom symptoms as toggleable chips */}
+        {allCustomIds.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", marginBottom: "6px" }}>
-            {customIds.map(id => (
-              <button key={id} style={styles.symptomChip(true)}
-                onClick={() => setLogEntry(p => ({ ...p, symptoms: p.symptoms.filter(s => s !== id) }))}>
-                ✦ {customSymptoms[id] || id.replace("custom_", "").replace(/_/g, " ")}
-              </button>
-            ))}
+            {allCustomIds.map(id => {
+              const selected = selectedCustomIds.includes(id);
+              const info = customRegistry[id];
+              return (
+                <button key={id} style={styles.symptomChip(selected)}
+                  onClick={() => setLogEntry(p => ({
+                    ...p,
+                    symptoms: selected
+                      ? p.symptoms.filter(s => s !== id)
+                      : [...p.symptoms, id],
+                  }))}>
+                  {info.emoji} {info.label}
+                </button>
+              );
+            })}
           </div>
         )}
         {adding ? (
@@ -707,7 +738,7 @@ export default function App() {
               autoFocus
               value={text}
               onChange={e => setText(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleAdd()}
+              onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
               placeholder="e.g. back tension"
               style={{ flex: 1, background: "#f5f0e6", border: "1px solid #e8ddd0", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", fontFamily: "'DM Sans', sans-serif", color: "#3e3428", outline: "none" }}
             />
@@ -722,62 +753,6 @@ export default function App() {
       </div>
     );
   }
-
-  // CUSTOM SYMPTOM INPUT
-  function CustomSymptomInput({ logEntry, setLogEntry }) {
-    const [adding, setAdding] = useState(false);
-    const [text, setText] = useState("");
-
-    function handleAdd() {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      const customId = "custom_" + trimmed.toLowerCase().replace(/ /g, "_");
-      setLogEntry(p => ({
-        ...p,
-        symptoms: p.symptoms.includes(customId) ? p.symptoms : [...p.symptoms, customId],
-        customSymptoms: { ...(p.customSymptoms || {}), [customId]: trimmed },
-      }));
-      setText("");
-      setAdding(false);
-    }
-
-    const customSymptoms = logEntry.customSymptoms || {};
-    const customIds = logEntry.symptoms.filter(s => s.startsWith("custom_"));
-
-    return (
-      <div>
-        {customIds.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", marginBottom: "6px" }}>
-            {customIds.map(id => (
-              <button key={id} style={styles.symptomChip(true)}
-                onClick={() => setLogEntry(p => ({ ...p, symptoms: p.symptoms.filter(s => s !== id) }))}>
-                ✦ {customSymptoms[id] || id.replace("custom_", "").replace(/_/g, " ")}
-              </button>
-            ))}
-          </div>
-        )}
-        {adding ? (
-          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-            <input
-              autoFocus
-              value={text}
-              onChange={e => setText(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
-              placeholder="e.g. back tension"
-              style={{ flex: 1, background: "#f5f0e6", border: "1px solid #e8ddd0", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", fontFamily: "'DM Sans', sans-serif", color: "#3e3428", outline: "none" }}
-            />
-            <button onClick={handleAdd} style={{ background: "linear-gradient(135deg, #8a6a9a, #6b4f7a)", border: "none", borderRadius: "8px", color: "white", padding: "7px 12px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Add</button>
-            <button onClick={() => { setAdding(false); setText(""); }} style={{ background: "none", border: "1px solid #e8ddd0", borderRadius: "8px", color: "#8a7e6a", padding: "7px 10px", fontSize: "12px", cursor: "pointer" }}>x</button>
-          </div>
-        ) : (
-          <button onClick={() => setAdding(true)} style={{ background: "none", border: "1.5px dashed #c8b8a8", borderRadius: "20px", padding: "6px 14px", fontSize: "12px", color: "#8a7e6a", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
-            + Add your own
-          </button>
-        )}
-      </div>
-    );
-  }
-
   // HOME VIEW
   function HomeView() {
     const cycleLen = nextPeriod?.cycleLength || settings.cycleLength || 28;
@@ -933,7 +908,7 @@ export default function App() {
               <div style={{ fontSize: "12px", fontWeight: "700", color: "#3e3428" }}>Energy across your cycle</div>
               <div style={{ fontSize: "10px", color: "#8a7e6a", marginTop: "1px" }}>Drag the dot to explore any day</div>
             </div>
-            <div style={{ fontSize: "9px", color: "#8a7e6a", textAlign: "right", lineHeight: 1.5 }}>low<br/>↕<br/>high</div>
+
           </div>
 
           <svg width="100%" viewBox={`0 0 ${W} ${H + 28}`} style={{ overflow: "visible", touchAction: "none", cursor: "ew-resize", userSelect: "none" }}
@@ -1450,55 +1425,66 @@ export default function App() {
           )}
         </div>
 
-        {/* Symptom patterns */}
-        <div style={styles.card}>
-          <p style={styles.sectionTitle}>Symptom patterns</p>
-          <p style={{ fontSize: "12px", color: "#8a7e6a", marginTop: 0 }}>Tap to see when each symptom typically appears</p>
-          <div style={{ display: "flex", flexWrap: "wrap" }}>
-            {SYMPTOMS.filter((s) => predictions[s.id]?.avgDay).map((s) => (
-              <button key={s.id} style={styles.symptomChip(selectedSymptom === s.id)} onClick={() => setSelectedSymptom(selectedSymptom === s.id ? null : s.id)}>
-                {s.emoji} {s.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Symptom patterns — built-in + custom */}
+        {(() => {
+          // Load custom registry
+          let customReg = {};
+          try { customReg = JSON.parse(localStorage.getItem("juno_custom_symptoms") || "{}"); } catch {}
+          // Build a unified list: built-in symptoms + any custom ones that appear in predictions
+          const customSymList = Object.entries(customReg).map(([id, info]) => ({ id, emoji: info.emoji || "✦", label: info.label }));
+          const allSymList = [...SYMPTOMS, ...customSymList];
+          const predictedSyms = allSymList.filter(s => predictions[s.id]?.avgDay);
 
-        {selectedSymptom && (
-          <div style={styles.card}>
-            {(() => {
-              const sym = SYMPTOMS.find((x) => x.id === selectedSymptom);
-              if (!sym) return null;
-              const comparison = getSymptomComparison(selectedSymptom);
-              const pred = predictions[selectedSymptom];
-              return (
-                <>
-                  <p style={styles.sectionTitle}>{sym.emoji} {sym.label}</p>
-                  {comparison.map((c, i) => (
-                    <div key={i} style={{ ...styles.insight, marginBottom: "8px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <strong>Cycle {c.cycleNum}{i === comparison.length - 1 ? " (current)" : ""}</strong>
-                        {c.days.length > 0
-                          ? <span style={{ color: "#6b4f7a", fontWeight: "600", fontSize: "12px" }}>Day {Math.min(...c.days)}{Math.min(...c.days) !== Math.max(...c.days) ? `–${Math.max(...c.days)}` : ""}</span>
-                          : <span style={{ color: "#b0a090", fontStyle: "italic", fontSize: "12px" }}>Not logged</span>
-                        }
+          return (
+            <div style={styles.card}>
+              <p style={styles.sectionTitle}>Symptom patterns</p>
+              <p style={{ fontSize: "12px", color: "#8a7e6a", marginTop: 0 }}>Tap to see when each symptom typically appears</p>
+              <div style={{ display: "flex", flexWrap: "wrap" }}>
+                {predictedSyms.map((s) => (
+                  <button key={s.id} style={styles.symptomChip(selectedSymptom === s.id)} onClick={() => setSelectedSymptom(selectedSymptom === s.id ? null : s.id)}>
+                    {s.emoji} {s.label}
+                  </button>
+                ))}
+              </div>
+
+              {selectedSymptom && (() => {
+                let customReg2 = {};
+                try { customReg2 = JSON.parse(localStorage.getItem("juno_custom_symptoms") || "{}"); } catch {}
+                const allSymList2 = [...SYMPTOMS, ...Object.entries(customReg2).map(([id, info]) => ({ id, emoji: info.emoji || "✦", label: info.label }))];
+                const sym = allSymList2.find(x => x.id === selectedSymptom);
+                if (!sym) return null;
+                const comparison = getSymptomComparison(selectedSymptom);
+                const pred = predictions[selectedSymptom];
+                return (
+                  <div style={{ marginTop: "12px", borderTop: "1px solid #eddde6", paddingTop: "12px" }}>
+                    <p style={styles.sectionTitle}>{sym.emoji} {sym.label}</p>
+                    {comparison.map((c, i) => (
+                      <div key={i} style={{ ...styles.insight, marginBottom: "8px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <strong>Cycle {c.cycleNum}{i === comparison.length - 1 ? " (current)" : ""}</strong>
+                          {c.days.length > 0
+                            ? <span style={{ color: "#6b4f7a", fontWeight: "600", fontSize: "12px" }}>Day {Math.min(...c.days)}{Math.min(...c.days) !== Math.max(...c.days) ? `–${Math.max(...c.days)}` : ""}</span>
+                            : <span style={{ color: "#b0a090", fontStyle: "italic", fontSize: "12px" }}>Not logged</span>
+                          }
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {pred && (
-                    <div style={{ background: "rgba(107,79,122,0.07)", border: "1px solid rgba(107,79,122,0.18)", borderRadius: "10px", padding: "10px 14px", marginTop: "8px" }}>
-                      <div style={{ fontSize: "13px", color: "#3e3428" }}>
-                        Typically appears around <strong>day {pred.avgDay}</strong>
+                    ))}
+                    {pred && (
+                      <div style={{ background: "rgba(107,79,122,0.07)", border: "1px solid rgba(107,79,122,0.18)", borderRadius: "10px", padding: "10px 14px", marginTop: "8px" }}>
+                        <div style={{ fontSize: "13px", color: "#3e3428" }}>
+                          Typically appears around <strong>day {pred.avgDay}</strong>
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#8a7e6a", marginTop: "3px" }}>
+                          Present in {pred.consistency}% of your cycles ({pred.cycleCount} of {cycles.length})
+                        </div>
                       </div>
-                      <div style={{ fontSize: "11px", color: "#8a7e6a", marginTop: "3px" }}>
-                        Present in {pred.consistency}% of your cycles ({pred.cycleCount} of {cycles.length})
-                      </div>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        )}
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })()}
 
         {!isPremium && (
           <div style={{ ...styles.card, textAlign: "center", border: "1.5px solid #eddde6" }}>
