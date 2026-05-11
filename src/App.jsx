@@ -1496,8 +1496,8 @@ export default function App() {
                 <div key={day} onClick={() => { setPopupDate(isPopup ? null : dateStr); setSelectedDate(dateStr); }}
                   style={{ aspectRatio: "1", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", cursor: "pointer", background: isPeriod ? "rgba(192,57,79,0.28)" : isToday ? "rgba(107,79,122,0.14)" : isPopup ? "rgba(107,79,122,0.10)" : "transparent", border: isToday ? "2px solid #b85c3a" : isPopup ? "1.5px solid #6b4f7a" : "none", color: isPeriod ? "#6b4f7a" : "#3e3428", fontWeight: isToday || isPopup ? "600" : "400", position: "relative", transition: "all 0.15s" }}>
                   {day}
-                  {isPeriod && <span style={{ position: "absolute", bottom: "1px", width: "4px", height: "4px", borderRadius: "50%", background: "#8a6a9a" }} />}
-                  {hasSymptoms && !isPeriod && <span style={{ position: "absolute", bottom: "1px", width: "4px", height: "4px", borderRadius: "50%", background: "#6b3a8a", opacity: 0.5 }} />}
+                  {isPeriod && <span style={{ position: "absolute", bottom: "8px", width: "4px", height: "4px", borderRadius: "50%", background: "#8a6a9a" }} />}
+                  {hasSymptoms && !isPeriod && <span style={{ position: "absolute", bottom: "8px", width: "4px", height: "4px", borderRadius: "50%", background: "#6b3a8a", opacity: 0.5 }} />}
                 </div>
               );
             })}
